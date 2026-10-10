@@ -299,6 +299,79 @@ endif (DISCORD_ENABLED)
 target_include_directories(engine-sim-app
     PUBLIC dependencies/submodules)
 
+# ========================================================
+# Submodule patches
+#
+# Fixes for submodules that can't be committed upstream from here. Each patch
+# is applied to the submodule's working tree at configure time; applying is
+# idempotent (a patch that is already in place is detected and skipped).
+#
+#   piranha-boost-filesystem-1.85.patch
+#       boost::filesystem::path::is_complete() was removed in Boost 1.85;
+#       is_absolute() is the identical replacement.
+
+set(ENGINE_SIM_SUBMODULE_PATCHES
+    "dependencies/submodules/piranha|patches/piranha-boost-filesystem-1.85.patch")
+
+find_package(Git QUIET)
+foreach (entry IN LISTS ENGINE_SIM_SUBMODULE_PATCHES)
+    string(REPLACE "|" ";" entry "${entry}")
+    list(GET entry 0 patch_target)
+    list(GET entry 1 patch_file)
+    set(patch_target "${CMAKE_CURRENT_SOURCE_DIR}/${patch_target}")
+    set(patch_file "${CMAKE_CURRENT_SOURCE_DIR}/${patch_file}")
+
+    if (NOT GIT_FOUND)
+        message(FATAL_ERROR "git is required to apply ${patch_file}")
+    endif ()
+
+    # --ignore-whitespace tolerates CRLF checkouts (core.autocrlf).
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" apply --reverse --check --ignore-whitespace "${patch_file}"
+        WORKING_DIRECTORY "${patch_target}"
+        RESULT_VARIABLE patch_already_applied
+        OUTPUT_QUIET ERROR_QUIET)
+
+    if (NOT patch_already_applied EQUAL 0)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" apply --ignore-whitespace "${patch_file}"
+            WORKING_DIRECTORY "${patch_target}"
+            RESULT_VARIABLE patch_result
+            ERROR_VARIABLE patch_error)
+
+        if (NOT patch_result EQUAL 0)
+            message(FATAL_ERROR "Failed to apply ${patch_file}:\n${patch_error}")
+        endif ()
+
+        message(STATUS "Applied ${patch_file}")
+    endif ()
+endforeach ()
+
+# ========================================================
+# SDL2 (vcpkg compatibility)
+#
+# delta-studio locates SDL2 through its own legacy Find modules, which only
+# search for import libraries named "SDL2"/"SDL2_image". vcpkg's static
+# triplets name them differently and export imported targets instead. When
+# those targets are available, seed the cache variables the Find modules
+# check so that they resolve to the vcpkg targets (which also carry SDL's
+# transitive system libraries).
+
+find_package(SDL2 CONFIG QUIET)
+find_package(SDL2_image CONFIG QUIET)
+
+if (TARGET SDL2::SDL2-static AND NOT SDL2_LIBRARY)
+    set(SDL2_LIBRARY SDL2::SDL2-static CACHE STRING "SDL2 library (vcpkg target)")
+elseif (TARGET SDL2::SDL2 AND NOT SDL2_LIBRARY)
+    set(SDL2_LIBRARY SDL2::SDL2 CACHE STRING "SDL2 library (vcpkg target)")
+endif ()
+
+if (TARGET SDL2_image::SDL2_image-static AND NOT SDL2_IMAGE_LIBRARY)
+    set(SDL2_IMAGE_LIBRARY SDL2_image::SDL2_image-static CACHE STRING "SDL2_image library (vcpkg target)")
+elseif (TARGET SDL2_image::SDL2_image AND NOT SDL2_IMAGE_LIBRARY)
+    set(SDL2_IMAGE_LIBRARY SDL2_image::SDL2_image CACHE STRING "SDL2_image library (vcpkg target)")
+endif ()
+
 add_subdirectory(dependencies)
 
 # GTEST
@@ -319,3 +392,74 @@ target_link_libraries(engine-sim-test
 
 include(GoogleTest)
 gtest_discover_tests(engine-sim-test)
+
+# ========================================================
+# GAME AUDIO EXPORT
+#
+# engine-sim-export renders seamless RPM loops, transients and sweeps for use
+# in games (see docs/game-audio-export.md). Requires the script interpreter.
+
+option(GAME_AUDIO_EXPORT "Build the game audio exporter (engine-sim-export)" ON)
+
+if (GAME_AUDIO_EXPORT AND NOT PIRANHA_ENABLED)
+    message(FATAL_ERROR "GAME_AUDIO_EXPORT requires PIRANHA_ENABLED")
+endif ()
+
+if (GAME_AUDIO_EXPORT)
+    find_package(Ogg CONFIG REQUIRED)
+    find_package(Vorbis CONFIG REQUIRED)
+    find_package(mp3lame CONFIG REQUIRED)
+
+    add_library(engine-sim-game-audio STATIC
+        # Source files
+        src/game_audio/audio_encoders.cpp
+        src/game_audio/engine_session.cpp
+        src/game_audio/exporter.cpp
+        src/game_audio/json_writer.cpp
+        src/game_audio/loop_builder.cpp
+        src/game_audio/loudness.cpp
+        src/game_audio/wav_file.cpp
+
+        # Include files
+        include/game_audio/audio_encoders.h
+        include/game_audio/engine_session.h
+        include/game_audio/exporter.h
+        include/game_audio/json_writer.h
+        include/game_audio/loop_builder.h
+        include/game_audio/loudness.h
+        include/game_audio/wav_file.h
+    )
+
+    target_link_libraries(engine-sim-game-audio
+        PUBLIC
+            engine-sim
+            engine-sim-script-interpreter
+        PRIVATE
+            Vorbis::vorbisenc
+            Vorbis::vorbis
+            Ogg::ogg
+            mp3lame::mp3lame)
+
+    target_include_directories(engine-sim-game-audio
+        PUBLIC dependencies/submodules)
+
+    add_executable(engine-sim-export
+        src/game_audio/export_main.cpp)
+
+    target_link_libraries(engine-sim-export
+        engine-sim-game-audio)
+
+    add_executable(engine-sim-game-audio-test
+        test/game_audio_tests.cpp)
+
+    target_link_libraries(engine-sim-game-audio-test
+        gtest_main
+        engine-sim-game-audio
+        Vorbis::vorbisfile)
+
+    # The integration tests load the bundled engine scripts.
+    target_compile_definitions(engine-sim-game-audio-test
+        PRIVATE ENGINE_SIM_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+
+    gtest_discover_tests(engine-sim-game-audio-test)
+endif (GAME_AUDIO_EXPORT)

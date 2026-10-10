@@ -14,6 +14,7 @@
 #include <mutex>
 #include <atomic>
 #include <condition_variable>
+#include <vector>
 
 class Synthesizer {
     public:
@@ -88,9 +89,20 @@ class Synthesizer {
 
         int16_t renderAudio(int inputOffset);
 
+        // Offline (non-realtime) rendering. Synchronously consumes all pending
+        // input and appends the raw synthesized signal to `output`, bypassing
+        // the volume control, the automatic leveler and int16 quantization so
+        // that the caller can apply a single, consistent gain across many
+        // renders. Must not be used while the audio rendering thread runs.
+        // Returns the number of samples appended.
+        int renderOffline(std::vector<float> &output);
+
         double getLevelerGain();
         AudioParameters getAudioParameters();
         void setAudioParameters(const AudioParameters &params);
+
+    protected:
+        float renderRawSample(int inputSample);
 
     //protected:
         ButterworthLowPassFilter<float> m_antialiasing;

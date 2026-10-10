@@ -10,3 +10,9 @@ compile_commands.json
 
 # Blender temporary files
 *.blend1
+
+# Game audio exporter output
+engine-audio-export/
+
+# Script compiler diagnostics (written to the working directory)
+error_log.log

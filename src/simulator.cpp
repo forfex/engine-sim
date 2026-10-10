@@ -166,6 +166,9 @@ void Simulator::endFrame() {
 
 void Simulator::destroy() {
     m_synthesizer.destroy();
+
+    delete[] m_dynoTorqueSamples;
+    m_dynoTorqueSamples = nullptr;
 }
 
 void Simulator::startAudioRenderingThread() {

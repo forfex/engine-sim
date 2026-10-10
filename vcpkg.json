@@ -1,0 +1,13 @@
+{
+  "name": "engine-sim",
+  "version-string": "0.1.12a",
+  "description": "Real-time internal combustion engine simulation with a game-audio sample exporter",
+  "dependencies": [
+    "sdl2",
+    "sdl2-image",
+    "boost-filesystem",
+    "libogg",
+    "libvorbis",
+    "mp3lame"
+  ]
+}
